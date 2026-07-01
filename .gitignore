@@ -15,3 +15,6 @@ output.wav
 .vscode/
 .idea/
 .DS_Store
+
+# md file
+Building Python CLI Chatbot-day1.md
