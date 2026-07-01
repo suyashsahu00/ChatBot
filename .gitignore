@@ -1,0 +1,17 @@
+# Local environment variables (API keys)
+.env
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local audio cache
+static/audio/reply_*.mp3
+output.mp3
+output.wav
+
+# IDE settings
+.vscode/
+.idea/
+.DS_Store
