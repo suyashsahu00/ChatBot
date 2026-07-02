@@ -16,77 +16,19 @@ from app.core.config import settings
 from app.api.routes import chat, uploads, audio, sessions, health
 
 
+from app.services.data.db_migrations import run_migrations
+
+
 # ---------------------------------------------------------------------------
 # Lifespan: database initialization (from legacy_app.py L52-76)
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize the SQLite database and create schemas on startup."""
+    """Initialize the SQLite database and run schema migrations on startup."""
     async with aiosqlite.connect(settings.database_file) as db:
         await db.execute("PRAGMA foreign_keys = ON")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                audio_url TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS attachments (
-                id TEXT PRIMARY KEY,
-                session_id TEXT,
-                original_filename TEXT NOT NULL,
-                content_type TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                storage_path TEXT NOT NULL,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS attachment_extractions (
-                id TEXT PRIMARY KEY,
-                attachment_id TEXT NOT NULL,
-                extraction_source TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error_message TEXT,
-                extracted_text TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                error_code TEXT,
-                extracted_char_count INTEGER DEFAULT 0,
-                extraction_confidence REAL,
-                normalization_applied INTEGER DEFAULT 0,
-                FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
-            )
-        """)
-        
-        # Verify schema upgrades for existing database installations
-        async with db.execute("PRAGMA table_info(attachment_extractions)") as cursor:
-            columns_info = await cursor.fetchall()
-            existing_columns = {col[1] for col in columns_info}
-
-        for name, col_type in [
-            ("error_code", "TEXT"),
-            ("extracted_char_count", "INTEGER DEFAULT 0"),
-            ("extraction_confidence", "REAL"),
-            ("normalization_applied", "INTEGER DEFAULT 0")
-        ]:
-            if name not in existing_columns:
-                await db.execute(f"ALTER TABLE attachment_extractions ADD COLUMN {name} {col_type}")
-
-        await db.commit()
+        await run_migrations(db)
     yield
 
 
