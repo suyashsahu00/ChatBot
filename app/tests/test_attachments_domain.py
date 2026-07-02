@@ -116,3 +116,65 @@ async def test_cleanup_expired_attachments_deletes_files_and_rows():
     assert att_after is None, "Expired attachment DB record was not cleaned up"
     assert ext_after is None, "Expired extraction DB record was not cascade cleaned up"
 
+
+@pytest.mark.asyncio
+async def test_migration_safety_logic():
+    import os
+    test_mig_db = "test_migration.db"
+    
+    # 1. Setup database with the old basic schema
+    async with aiosqlite.connect(test_mig_db) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS attachment_extractions (
+                id TEXT PRIMARY KEY,
+                attachment_id TEXT NOT NULL,
+                extraction_source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                extracted_text TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.commit()
+
+    try:
+        # 2. Run schema migration logic
+        async with aiosqlite.connect(test_mig_db) as db:
+            async with db.execute("PRAGMA table_info(attachment_extractions)") as cursor:
+                columns_info = await cursor.fetchall()
+                existing_columns = {col[1] for col in columns_info}
+                
+            # Assert target columns are missing initially
+            assert "error_code" not in existing_columns
+            assert "extracted_char_count" not in existing_columns
+            
+            # Apply missing ones
+            for name, col_type in [
+                ("error_code", "TEXT"),
+                ("extracted_char_count", "INTEGER DEFAULT 0"),
+                ("extraction_confidence", "REAL"),
+                ("normalization_applied", "INTEGER DEFAULT 0")
+            ]:
+                if name not in existing_columns:
+                    await db.execute(f"ALTER TABLE attachment_extractions ADD COLUMN {name} {col_type}")
+            await db.commit()
+
+        # 3. Verify columns now exist
+        async with aiosqlite.connect(test_mig_db) as db:
+            async with db.execute("PRAGMA table_info(attachment_extractions)") as cursor:
+                columns_info = await cursor.fetchall()
+                existing_columns = {col[1] for col in columns_info}
+            
+            assert "error_code" in existing_columns
+            assert "extracted_char_count" in existing_columns
+            assert "extraction_confidence" in existing_columns
+            assert "normalization_applied" in existing_columns
+
+    finally:
+        if os.path.exists(test_mig_db):
+            try:
+                os.remove(test_mig_db)
+            except Exception:
+                pass
+
+

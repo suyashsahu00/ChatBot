@@ -43,7 +43,11 @@ async def create_extraction_result(
     extraction_source: str,
     status: str,
     error_message: str | None,
-    extracted_text: str | None,
+    extracted_text: str | None = None,
+    error_code: str | None = None,
+    extracted_char_count: int = 0,
+    extraction_confidence: float | None = None,
+    normalization_applied: int = 0,
 ) -> None:
     """Insert a new attachment extraction result record into the database."""
     async with aiosqlite.connect(db_file) as db:
@@ -51,8 +55,9 @@ async def create_extraction_result(
         await db.execute(
             """
             INSERT INTO attachment_extractions (
-                id, attachment_id, extraction_source, status, error_message, extracted_text
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, attachment_id, extraction_source, status, error_message, extracted_text,
+                error_code, extracted_char_count, extraction_confidence, normalization_applied
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 id,
@@ -61,6 +66,10 @@ async def create_extraction_result(
                 status,
                 error_message,
                 extracted_text,
+                error_code,
+                extracted_char_count,
+                extraction_confidence,
+                normalization_applied,
             ),
         )
         await db.commit()

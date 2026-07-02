@@ -162,3 +162,98 @@ async def test_upload_rejects_file_too_large_and_logs_failure(client):
         settings.max_upload_bytes = original_limit
 
 
+@pytest.mark.asyncio
+@patch("app.services.extraction.image_parser.parse_image")
+async def test_upload_jpeg_signature_validation(mock_parse_image, client):
+    mock_parse_image.return_value = "Mocked JPEG extraction"
+
+    # 1. Valid JPEG signature: FF D8 FF
+    file_payload = {"file": ("image.jpg", b"\xff\xd8\xff\xe0\x00\x10JFIF", "image/jpeg")}
+    response = client.post("/api/upload", files=file_payload)
+    
+    assert response.status_code == 200
+    assert response.json()["extracted_text"] == "Mocked JPEG extraction"
+
+    # 2. Invalid JPEG signature
+    file_payload_bad = {"file": ("image.jpg", b"\xff\xd8\x00\xe0JFIF", "image/jpeg")}
+    response_bad = client.post("/api/upload", files=file_payload_bad)
+    
+    assert response_bad.status_code == 400
+    assert "Invalid file signature" in response_bad.json()["detail"]
+
+    # Verify invalid signature logging in database
+    async with aiosqlite.connect(settings.database_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM attachment_extractions WHERE status = 'failed'") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            ext = dict(rows[0])
+            assert ext["extraction_source"] == "signature_validator"
+            assert ext["error_code"] == "invalid_signature"
+            assert ext["error_message"] == "Invalid JPEG signature."
+
+
+@pytest.mark.asyncio
+async def test_upload_zero_byte_logs_empty_upload(client):
+    file_payload = {"file": ("empty.txt", b"", "text/plain")}
+    response = client.post("/api/upload", files=file_payload)
+
+    assert response.status_code == 400
+    assert "Uploaded file is empty" in response.json()["detail"]
+
+    # Verify zero-byte database logging
+    async with aiosqlite.connect(settings.database_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM attachment_extractions") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            ext = dict(rows[0])
+            assert ext["extraction_source"] == "zero_byte_check"
+            assert ext["error_code"] == "empty_upload"
+            assert ext["error_message"] == "Uploaded file is empty."
+
+
+@pytest.mark.asyncio
+async def test_upload_empty_extraction_logs_correctly(client):
+    # Upload file with only spaces/control noise -> yields empty normalized text
+    file_payload = {"file": ("blank.txt", b"\x00\x01   \x02\r\n", "text/plain")}
+    response = client.post("/api/upload", files=file_payload)
+
+    assert response.status_code == 400
+    assert "No extractable text found" in response.json()["detail"]
+
+    # Verify empty extraction logging in database
+    async with aiosqlite.connect(settings.database_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM attachment_extractions") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            ext = dict(rows[0])
+            assert ext["extraction_source"] == "text_parser"
+            assert ext["error_code"] == "empty_extraction"
+            assert ext["error_message"] == "No extractable text found"
+
+
+@pytest.mark.asyncio
+async def test_upload_normalization_works(client):
+    # Text with CRLF, control codes, excessive spacing, outer padding
+    raw_bytes = b" \x00\x07Hello\r\n\r\n\r\n\r\nWorld \r\n"
+    file_payload = {"file": ("normal.txt", raw_bytes, "text/plain")}
+    
+    response = client.post("/api/upload", files=file_payload)
+    assert response.status_code == 200
+    
+    expected_text = "Hello\n\nWorld"
+    assert response.json()["extracted_text"] == expected_text
+
+    # Verify normalization metadata in database
+    async with aiosqlite.connect(settings.database_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM attachment_extractions") as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            ext = dict(rows[0])
+            assert ext["extracted_text"] == expected_text
+            assert ext["normalization_applied"] == 1
+            assert ext["extracted_char_count"] == len(expected_text)
+            assert ext["extraction_confidence"] == 0.95

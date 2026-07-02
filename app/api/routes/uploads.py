@@ -18,10 +18,6 @@ async def upload_file_endpoint(file: UploadFile = File(...)):
 
     try:
         file_bytes = await file.read()
-        if not file_bytes:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 

@@ -64,9 +64,28 @@ async def lifespan(app: FastAPI):
                 error_message TEXT,
                 extracted_text TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                error_code TEXT,
+                extracted_char_count INTEGER DEFAULT 0,
+                extraction_confidence REAL,
+                normalization_applied INTEGER DEFAULT 0,
                 FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
             )
         """)
+        
+        # Verify schema upgrades for existing database installations
+        async with db.execute("PRAGMA table_info(attachment_extractions)") as cursor:
+            columns_info = await cursor.fetchall()
+            existing_columns = {col[1] for col in columns_info}
+
+        for name, col_type in [
+            ("error_code", "TEXT"),
+            ("extracted_char_count", "INTEGER DEFAULT 0"),
+            ("extraction_confidence", "REAL"),
+            ("normalization_applied", "INTEGER DEFAULT 0")
+        ]:
+            if name not in existing_columns:
+                await db.execute(f"ALTER TABLE attachment_extractions ADD COLUMN {name} {col_type}")
+
         await db.commit()
     yield
 
