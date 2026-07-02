@@ -73,9 +73,11 @@ class SQLiteVectorStore:
                 SELECT 
                     c.id, c.attachment_id, c.extraction_id, c.chunk_index, c.chunk_text, c.char_count, 
                     c.token_estimate, c.embedding_vector,
-                    e.extraction_confidence, e.normalization_applied, e.extracted_char_count, e.status
+                    e.extraction_confidence, e.normalization_applied, e.extracted_char_count, e.status,
+                    a.original_filename
                 FROM attachment_chunks c
                 JOIN attachment_extractions e ON c.extraction_id = e.id
+                JOIN attachments a ON c.attachment_id = a.id
                 WHERE e.status = 'succeeded'
                 """
             ) as cursor:
