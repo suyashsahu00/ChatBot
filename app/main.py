@@ -24,6 +24,7 @@ from app.api.routes import chat, uploads, audio, sessions, health
 async def lifespan(app: FastAPI):
     """Initialize the SQLite database and create schemas on startup."""
     async with aiosqlite.connect(settings.database_file) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -40,6 +41,30 @@ async def lifespan(app: FastAPI):
                 audio_url TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                original_filename TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                storage_path TEXT NOT NULL,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS attachment_extractions (
+                id TEXT PRIMARY KEY,
+                attachment_id TEXT NOT NULL,
+                extraction_source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                extracted_text TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
             )
         """)
         await db.commit()

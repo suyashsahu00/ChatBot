@@ -26,7 +26,7 @@ async def upload_file_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
     try:
-        extracted_text = extract_content(file_bytes, filename, content_type)
+        extracted_text = await extract_content(file_bytes, filename, content_type)
     except ValueError as val_err:
         raise HTTPException(status_code=400, detail=str(val_err))
     except Exception as e:

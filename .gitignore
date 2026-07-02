@@ -1,26 +1,28 @@
-# Local environment variables (API keys)
+# Secrets
 .env
+.env.local
 
 # Python virtual environment
 .venv/
 __pycache__/
 *.pyc
 
-# Local audio cache
+# Local databases
+*.db
+*.sqlite
+
+# Uploaded/generated files
+uploads/*
+!uploads/.gitkeep
 static/audio/*
 output.mp3
 output.wav
+temp_*
 
-# IDE settings
+# IDE / local state
 .vscode/
 .idea/
 .DS_Store
-
-# Database
-chatbot.db
-
-# Temporary assets
-temp_*
 
 # md file
 Building Python CLI Chatbot-day1.md

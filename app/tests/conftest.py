@@ -16,6 +16,7 @@ def setup_test_db():
     # Setup the test database schema
     async def create_schema():
         async with aiosqlite.connect(TEST_DB_FILE) as db:
+            await db.execute("PRAGMA foreign_keys = ON")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
@@ -32,6 +33,30 @@ def setup_test_db():
                     audio_url TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    original_filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    storage_path TEXT NOT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS attachment_extractions (
+                    id TEXT PRIMARY KEY,
+                    attachment_id TEXT NOT NULL,
+                    extraction_source TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error_message TEXT,
+                    extracted_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
                 )
             """)
             await db.commit()
