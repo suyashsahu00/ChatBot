@@ -91,6 +91,11 @@ async def get_extraction_by_attachment_id(db_file: str, attachment_id: str) -> d
             return dict(row) if row else None
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 async def delete_attachment(db_file: str, id: str) -> None:
     """Delete an attachment by its ID, validating cascade deletion of referencing extractions."""
     async with aiosqlite.connect(db_file) as db:
@@ -127,9 +132,9 @@ async def cleanup_expired_attachments(db_file: str, retention_days: int) -> None
             if phys_path.startswith(uploads_dir) and os.path.exists(phys_path):
                 try:
                     os.remove(phys_path)
-                    print(f"Deleted expired attachment file: {phys_path}")
+                    logger.info(f"Deleted expired attachment file: {phys_path}")
                 except Exception as e:
-                    print(f"Error removing expired attachment file {phys_path}: {e}")
+                    logger.error(f"Error removing expired attachment file {phys_path}: {e}")
 
     # Delete database rows
     async with aiosqlite.connect(db_file) as db:
@@ -139,4 +144,5 @@ async def cleanup_expired_attachments(db_file: str, retention_days: int) -> None
             (str(retention_days),),
         )
         await db.commit()
+
 
