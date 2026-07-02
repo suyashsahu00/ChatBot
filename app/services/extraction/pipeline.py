@@ -7,9 +7,14 @@ Saves uploaded files securely and persists metadata in database.
 import os
 import re
 import uuid
+import logging
+import aiosqlite
 from app.core.config import settings
 from app.services.data import attachments
 from app.services.extraction import text_parser, pdf_parser, image_parser
+
+
+logger = logging.getLogger(__name__)
 
 
 async def extract_content(
@@ -285,10 +290,60 @@ async def extract_content(
             extraction_confidence=confidence,
             normalization_applied=normalization_applied,
         )
+
+        # Generate chunks & embeddings and index them
+        try:
+            from app.services.retrieval import chunking, embeddings, vector_store
+            
+            # 1. Clean previous chunks to prevent duplicates (re-indexing protection)
+            store = vector_store.get_vector_store(db_file)
+            await store.delete_chunks_by_attachment_id(attachment_id)
+            
+            # 2. Split text into chunks
+            chunks = chunking.chunk_text(norm_text)
+            
+            # 3. Embed & persist chunks
+            for chunk in chunks:
+                vector = await embeddings.get_embedding(chunk["chunk_text"])
+                await store.store_chunk(
+                    id=str(uuid.uuid4()),
+                    attachment_id=attachment_id,
+                    extraction_id=extraction_id,
+                    chunk_index=chunk["chunk_index"],
+                    chunk_text=chunk["chunk_text"],
+                    char_count=chunk["char_count"],
+                    token_estimate=chunk["token_estimate"],
+                    embedding_model=embeddings.get_model_name(),
+                    embedding_vector=vector,
+                )
+        except Exception as index_err:
+            logger.error(f"Failed to generate chunks/embeddings for attachment {attachment_id}: {index_err}")
+            
+            # Update extraction result to failed with distinct indexing_failure error code
+            try:
+                async with aiosqlite.connect(db_file) as db:
+                    await db.execute("PRAGMA foreign_keys = ON")
+                    await db.execute(
+                        """
+                        UPDATE attachment_extractions 
+                        SET status = 'failed', error_code = 'indexing_failure', error_message = ?
+                        WHERE id = ?
+                        """,
+                        (f"Indexing failed: {str(index_err)}", extraction_id),
+                    )
+                    await db.commit()
+            except Exception as db_err:
+                logger.error(f"DB update failed during indexing error handling: {db_err}")
+                
+            raise ValueError(f"Indexing failed: {str(index_err)}")
+
         return norm_text
 
     except Exception as e:
-        if isinstance(e, ValueError) and str(e) in ("No extractable text found", "Uploaded file is empty.", "Invalid file signature"):
+        if isinstance(e, ValueError) and (
+            str(e) in ("No extractable text found", "Uploaded file is empty.", "Invalid file signature")
+            or str(e).startswith("Indexing failed:")
+        ):
             raise
 
         # Save failure extraction result

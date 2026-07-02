@@ -39,3 +39,11 @@ def client():
     from app.main import app
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def mock_embeddings_global():
+    """Automatically mock all external embeddings API calls during tests."""
+    from unittest.mock import patch
+    with patch("app.services.retrieval.embeddings.get_embedding", return_value=[0.1]*1536) as mock:
+        yield mock

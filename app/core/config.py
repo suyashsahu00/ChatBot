@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024  # Default: 5MB
     attachment_retention_days: int = 30  # Default: 30 days
 
+    # Embeddings Configuration
+    embedding_provider: str = "openai"  # openai or google
+    openai_embedding_model: str = "text-embedding-3-small"
+    google_embedding_model: str = "models/embedding-001"
+
     @field_validator(
         "openrouter_api_key",
         "murf_api_key",

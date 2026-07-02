@@ -7,7 +7,7 @@ import logging
 import aiosqlite
 
 logger = logging.getLogger(__name__)
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 
 
 async def get_user_version(db: aiosqlite.Connection) -> int:
@@ -114,3 +114,36 @@ async def run_migrations(db: aiosqlite.Connection) -> None:
         
     if current < 2:
         await migrate_to_v2(db)
+        current = 2
+
+    if current < 3:
+        await migrate_to_v3(db)
+
+
+async def migrate_to_v3(db: aiosqlite.Connection) -> None:
+    """Migrate database to Version 3 (Add attachment_chunks table for retrieval)."""
+    logger.info("Running database migration to version 3 (attachment chunks)...")
+    await db.execute("BEGIN")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS attachment_chunks (
+            id TEXT PRIMARY KEY,
+            attachment_id TEXT NOT NULL,
+            extraction_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            chunk_text TEXT NOT NULL,
+            char_count INTEGER NOT NULL,
+            token_estimate INTEGER NOT NULL,
+            embedding_model TEXT NOT NULL,
+            embedding_vector TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE,
+            FOREIGN KEY (extraction_id) REFERENCES attachment_extractions(id) ON DELETE CASCADE
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_attachment_id ON attachment_chunks(attachment_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_extraction_id ON attachment_chunks(extraction_id)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_chunk_index ON attachment_chunks(chunk_index)")
+    await set_user_version(db, 3)
+    await db.execute("COMMIT")
+    logger.info("Successfully migrated database to version 3.")
+
