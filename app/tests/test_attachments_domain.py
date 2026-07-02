@@ -59,3 +59,60 @@ async def test_attachment_domain_helpers():
     ext_check = await attachments.get_extraction_by_attachment_id(db_file, att_id)
     assert att_check is None, "Attachment row was not deleted"
     assert ext_check is None, "Cascade delete did not remove linked extraction result"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_attachments_deletes_files_and_rows():
+    import os
+    db_file = settings.database_file
+    
+    # 1. Create a dummy file in uploads/
+    uploads_dir = os.path.abspath("uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    temp_storage_path = os.path.join(uploads_dir, "expired-test.txt")
+    with open(temp_storage_path, "w") as f:
+        f.write("Expired file test content")
+        
+    # Relative path for database entry
+    db_storage_path = os.path.join("uploads", "expired-test.txt").replace("\\", "/")
+
+    # 2. Insert backdated attachment (35 days ago) and extraction records
+    att_id = "expired-uuid-1"
+    async with aiosqlite.connect(db_file) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        await db.execute(
+            """
+            INSERT INTO attachments (
+                id, session_id, original_filename, content_type, size_bytes, storage_path, uploaded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-35 days'))
+            """,
+            (att_id, None, "expired.txt", "text/plain", 25, db_storage_path)
+        )
+        await db.execute(
+            """
+            INSERT INTO attachment_extractions (
+                id, attachment_id, extraction_source, status, error_message, extracted_text
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("expired-ext-uuid", att_id, "text_parser", "succeeded", None, "Parsed text content")
+        )
+        await db.commit()
+
+    # Verify rows exist before cleanup
+    att_before = await attachments.get_attachment_by_id(db_file, att_id)
+    ext_before = await attachments.get_extraction_by_attachment_id(db_file, att_id)
+    assert att_before is not None
+    assert ext_before is not None
+    assert os.path.exists(temp_storage_path)
+
+    # 3. Execute cleanup with a 30-day retention threshold
+    await attachments.cleanup_expired_attachments(db_file, 30)
+
+    # 4. Verify cleanup deleted both the physical file and the database records
+    assert not os.path.exists(temp_storage_path), "Physical expired file was not deleted"
+    
+    att_after = await attachments.get_attachment_by_id(db_file, att_id)
+    ext_after = await attachments.get_extraction_by_attachment_id(db_file, att_id)
+    assert att_after is None, "Expired attachment DB record was not cleaned up"
+    assert ext_after is None, "Expired extraction DB record was not cascade cleaned up"
+

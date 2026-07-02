@@ -97,3 +97,46 @@ async def delete_attachment(db_file: str, id: str) -> None:
         await db.execute("PRAGMA foreign_keys = ON")
         await db.execute("DELETE FROM attachments WHERE id = ?", (id,))
         await db.commit()
+
+
+async def cleanup_expired_attachments(db_file: str, retention_days: int) -> None:
+    """
+    Find attachments older than retention_days, delete their physical files,
+    and delete their database rows (cascade deletes referencing extractions).
+    """
+    import os
+
+    # Query the attachments older than retention_days
+    async with aiosqlite.connect(db_file) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, storage_path FROM attachments WHERE uploaded_at < datetime('now', '-' || ? || ' days')",
+            (str(retention_days),),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    # Delete physical files securely
+    uploads_dir = os.path.abspath("uploads")
+    for r in rows:
+        storage_path = r["storage_path"]
+        if storage_path:
+            # Resolve physical path
+            phys_path = os.path.abspath(storage_path)
+            # Safe bounds check to ensure it doesn't escape uploads/
+            if phys_path.startswith(uploads_dir) and os.path.exists(phys_path):
+                try:
+                    os.remove(phys_path)
+                    print(f"Deleted expired attachment file: {phys_path}")
+                except Exception as e:
+                    print(f"Error removing expired attachment file {phys_path}: {e}")
+
+    # Delete database rows
+    async with aiosqlite.connect(db_file) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        await db.execute(
+            "DELETE FROM attachments WHERE uploaded_at < datetime('now', '-' || ? || ' days')",
+            (str(retention_days),),
+        )
+        await db.commit()
+

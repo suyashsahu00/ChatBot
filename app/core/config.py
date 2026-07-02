@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # Server
     port: int = 8000
 
+    # Uploads Hardening & Retention
+    max_upload_bytes: int = 5 * 1024 * 1024  # Default: 5MB
+    attachment_retention_days: int = 30  # Default: 30 days
+
     @field_validator(
         "openrouter_api_key",
         "murf_api_key",

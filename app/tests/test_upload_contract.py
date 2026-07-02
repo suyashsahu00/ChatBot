@@ -106,8 +106,59 @@ async def test_upload_integration_failed(client):
             assert len(ext_rows) == 1
             ext = dict(ext_rows[0])
             assert ext["attachment_id"] == att["id"]
-            assert ext["extraction_source"] == "unsupported"
+            assert ext["extraction_source"] == "type_validator"
             assert ext["status"] == "failed"
             assert "Unsupported file type: .xyz" in ext["error_message"]
             assert ext["extracted_text"] is None
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_mismatched_content_type(client):
+    # Upload .pdf file but with text/plain content type (should trigger MIME consistency failure)
+    file_payload = {"file": ("document.pdf", b"some pdf contents", "text/plain")}
+    response = client.post("/api/upload", files=file_payload)
+
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["detail"]
+
+    # Verify rows in database
+    async with aiosqlite.connect(settings.database_file) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM attachment_extractions") as cursor:
+            ext_rows = await cursor.fetchall()
+            assert len(ext_rows) == 1
+            ext = dict(ext_rows[0])
+            assert ext["extraction_source"] == "type_validator"
+            assert ext["status"] == "failed"
+            assert "Mismatched content type: text/plain for .pdf" in ext["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_file_too_large_and_logs_failure(client):
+    # Mock settings.max_upload_bytes limit to 10 bytes
+    original_limit = settings.max_upload_bytes
+    settings.max_upload_bytes = 10
+
+    try:
+        # Upload 15 bytes file (exceeds 10 bytes limit)
+        file_payload = {"file": ("hello.txt", b"Oversized file contents!", "text/plain")}
+        response = client.post("/api/upload", files=file_payload)
+
+        assert response.status_code == 400
+        assert "File too large" in response.json()["detail"]
+
+        # Verify database log contains the failure
+        async with aiosqlite.connect(settings.database_file) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM attachment_extractions") as cursor:
+                ext_rows = await cursor.fetchall()
+                assert len(ext_rows) == 1
+                ext = dict(ext_rows[0])
+                assert ext["extraction_source"] == "size_validator"
+                assert ext["status"] == "failed"
+                assert ext["error_message"] == "File too large"
+    finally:
+        # Restore limit
+        settings.max_upload_bytes = original_limit
+
 
