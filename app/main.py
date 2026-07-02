@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
-from app.api.routes import chat, uploads, audio, sessions, health
+from app.api.routes import chat, uploads, audio, sessions, health, debug
 
 
 from app.services.data.db_migrations import run_migrations
@@ -52,6 +52,7 @@ app.include_router(sessions.router,  prefix="/api", tags=["sessions"])
 app.include_router(chat.router,      prefix="/api", tags=["chat"])
 app.include_router(uploads.router,   prefix="/api", tags=["uploads"])
 app.include_router(audio.router,     prefix="/api", tags=["audio"])
+app.include_router(debug.router,     prefix="/api", tags=["debug"])
 
 # Serve static assets (from legacy_app.py L614-615)
 app.mount("/static", StaticFiles(directory="static"), name="static")

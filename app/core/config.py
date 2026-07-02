@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     google_embedding_model: str = "models/embedding-001"
 
+    # RAG Observability & Answering Configuration
+    enable_grounding: bool = True
+    rag_top_k: int = 3
+    rag_score_threshold: float = 0.35
+    enable_debug_routes: bool = False
+
     @field_validator(
         "openrouter_api_key",
         "murf_api_key",

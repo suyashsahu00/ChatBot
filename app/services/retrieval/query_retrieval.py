@@ -1,41 +1,86 @@
 """
 Orchestrates semantic retrieval by embedding user queries,
 retrieving candidates, and applying quality reranking/metadata filters.
+Includes metrics tracking and structured logging.
 """
 
+import logging
+from app.core.config import settings
 from app.services.retrieval import embeddings, vector_store, ranking
 
+logger = logging.getLogger(__name__)
+
 MAX_CONTEXT_CHARS = 3000
+
+# Global metrics counters
+metrics = {
+    "grounded_responses_count": 0,
+    "ungrounded_responses_count": 0,
+}
+
+
+def get_retrieval_metrics() -> dict:
+    """Return the current retrieval metrics counters."""
+    return metrics
 
 
 async def retrieve_grounding_context(
     query: str,
     db_file: str,
-    top_k: int = 3,
+    top_k: int = None,
 ) -> dict:
     """
     Accepts user query, generates query embedding, retrieves top candidate chunks,
     reranks them by quality filters, and formats them into a compact grounding block.
     """
-    # 1. Check for empty query
-    if not query.strip():
+    # 1. Respect configuration toggle
+    if not settings.enable_grounding:
+        logger.info("RAG Retrieval: Grounding disabled via config toggles.")
+        metrics["ungrounded_responses_count"] += 1
         return {"grounding_context": "", "sources": []}
+
+    # Use config default if top_k not specified
+    if top_k is None:
+        top_k = settings.rag_top_k
+
+    # 2. Check for empty query
+    if not query.strip():
+        logger.info("RAG Retrieval: Empty user query. Skipping grounding.")
+        metrics["ungrounded_responses_count"] += 1
+        return {"grounding_context": "", "sources": []}
+
+    logger.info(f"RAG Retrieval: Query='{query}'")
 
     try:
-        # 2. Embed the query
+        # 3. Embed the query
         query_vector = await embeddings.get_embedding(query)
-    except Exception:
-        # Graceful failure if embedding generation fails (e.g. network timeout or API key missing)
+    except Exception as e:
+        logger.warning(f"RAG Retrieval: Query embedding generation failed: {e}")
+        metrics["ungrounded_responses_count"] += 1
         return {"grounding_context": "", "sources": []}
 
-    # 3. Retrieve candidates
+    # 4. Retrieve candidates
     store = vector_store.get_vector_store(db_file)
     candidates = await store.search_similar_chunks(query_vector, top_n=20)
+    
+    # Log raw candidates retrieval results
+    candidates_summary = [{"id": c["id"], "similarity": c["similarity"]} for c in candidates]
+    logger.info(f"RAG Retrieval: Candidates retrieved count={len(candidates)}, list={candidates_summary}")
 
-    # 4. Rerank candidates using threshold = 0.35
-    reranked = ranking.rerank_chunks(candidates, top_k=top_k, score_threshold=0.35)
+    if not candidates:
+        logger.info("RAG Retrieval: Skip grounding (no candidates found in database).")
+        metrics["ungrounded_responses_count"] += 1
+        return {"grounding_context": "", "sources": []}
 
-    # 5. Build grounding context string with size cap protection
+    # 5. Rerank candidates using configured threshold
+    reranked = ranking.rerank_chunks(candidates, top_k=top_k, score_threshold=settings.rag_score_threshold)
+
+    if not reranked:
+        logger.info(f"RAG Retrieval: Skip grounding (all candidates filtered below threshold={settings.rag_score_threshold}).")
+        metrics["ungrounded_responses_count"] += 1
+        return {"grounding_context": "", "sources": []}
+
+    # 6. Build grounding context string with size cap protection
     blocks = []
     sources = []
     current_chars = 0
@@ -60,6 +105,14 @@ async def retrieve_grounding_context(
             "final_score": chunk["final_score"],
         })
         current_chars += len(block) + 2  # account for double newline spacing
+
+    # Log actually used chunks
+    used_summary = [
+        {"attachment_id": s["attachment_id"], "chunk_index": s["chunk_index"], "final_score": s["final_score"]}
+        for s in sources
+    ]
+    logger.info(f"RAG Retrieval: Grounding used count={len(sources)}, chunks={used_summary}")
+    metrics["grounded_responses_count"] += 1
 
     grounding_context = "\n\n".join(blocks)
     return {
