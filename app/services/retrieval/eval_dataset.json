@@ -3,12 +3,16 @@
     "query": "What are the rules for grounded answering?",
     "expected_attachment_id": "eval-att-1",
     "expected_keywords": ["rules", "grounded", "clean"],
-    "expected_answer_keywords": ["grounded", "rules", "clean"]
+    "expected_answer_keywords": ["grounded", "rules", "clean"],
+    "expected_groundedness_mode": "faithful",
+    "expected_relevance_mode": "relevant"
   },
   {
     "query": "Where is the detailed specification info?",
     "expected_attachment_id": "eval-att-2",
     "expected_keywords": ["detailed", "specification", "store"],
-    "expected_answer_keywords": ["detailed", "specification"]
+    "expected_answer_keywords": ["detailed", "specification"],
+    "expected_groundedness_mode": "faithful",
+    "expected_relevance_mode": "relevant"
   }
 ]
