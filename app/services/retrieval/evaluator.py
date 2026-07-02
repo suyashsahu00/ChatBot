@@ -2,21 +2,29 @@
 Offline RAG Evaluator.
 Computes recall, precision, attribution correctness, keyword matches,
 along with latency, cost, and LLM-as-a-Judge evaluations.
+Integrates report builder to save results to disk.
 """
 
 import json
 import os
 import time
-from app.services.retrieval import query_retrieval
+from typing import Optional
+from app.services.retrieval import query_retrieval, report_builder
 from app.services.llm.service import generate_response
 from app.services.retrieval.llm_judge import judge_faithfulness
 
 
-async def evaluate_rag(db_file: str, dataset_path: str) -> dict:
+async def evaluate_rag(
+    db_file: str,
+    dataset_path: str,
+    save_reports: bool = False,
+    output_dir: Optional[str] = None,
+) -> dict:
     """
     Runs the labeled QA dataset queries through the retrieval + generation stack,
     computes key metrics (Recall, Precision, Attribution, Keyword Match),
-    tracks latency and estimated API costs, and runs the faithfulness LLM judge.
+    tracks latency and estimated API costs, runs LLM faithfulness judge,
+    and optionally saves Markdown/JSON report artifacts.
     """
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Evaluation dataset file not found at: {dataset_path}")
@@ -121,8 +129,9 @@ async def evaluate_rag(db_file: str, dataset_path: str) -> dict:
         judge_score = judge_res.get("score", 0.0)
         judge_passed = judge_res.get("passed", False)
         judge_skipped = judge_res.get("skipped", False)
+        judge_reason = judge_res.get("reason", "N/A")
 
-        results.append({
+        case_res = {
             "query": query,
             "expected_attachment_id": expected_att_id,
             "context_recall": context_recall,
@@ -140,7 +149,15 @@ async def evaluate_rag(db_file: str, dataset_path: str) -> dict:
             "judge_score": judge_score,
             "judge_passed": judge_passed,
             "judge_skipped": judge_skipped,
-        })
+            "judge_reason": judge_reason,
+        }
+
+        # 6. Apply Status Classification & Failure Reasons
+        status, reasons = report_builder.classify_case_status(case_res)
+        case_res["status"] = status
+        case_res["reasons"] = reasons
+
+        results.append(case_res)
 
         total_recall += context_recall
         total_precision += context_precision
@@ -159,7 +176,7 @@ async def evaluate_rag(db_file: str, dataset_path: str) -> dict:
             non_skipped_judge_count += 1
 
     count = len(cases)
-    return {
+    metrics_dict = {
         "results": results,
         "average_recall": total_recall / count if count else 0.0,
         "average_precision": total_precision / count if count else 0.0,
@@ -173,3 +190,10 @@ async def evaluate_rag(db_file: str, dataset_path: str) -> dict:
         "average_total_latency_ms": total_tot_latency / count if count else 0.0,
         "average_estimated_cost_usd": total_cost / count if count else 0.0,
     }
+
+    if save_reports:
+        json_path, md_path = report_builder.save_report_runs(metrics_dict, output_dir)
+        metrics_dict["report_json_path"] = json_path
+        metrics_dict["report_md_path"] = md_path
+
+    return metrics_dict
